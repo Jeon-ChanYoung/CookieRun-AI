@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cookie Run AI</title>
+    <link rel="stylesheet" href="/static/style.css"> 
+    <!-- <link rel="stylesheet" href="style.css"> -->
+</head>
+<body>
+    <div class="container">
+        <div class="game-wrapper">
+            <div class="top-row">
+                <div id="hud" class="hud">
+                    <span>FPS: <b id="hud-fps">--</b></span>
+                    <span class="hud-sep">&nbsp;&nbsp;</span>
+                    <span>ACTION: <b id="hud-action">IDLE</b></span>
+                </div>
+                
+                <button id="btn-reset" class="btn btn-action btn-reset">R</button>
+            </div>
+            
+            <div class="game-screen">
+                <img id="game-image" src="" alt="Game State">
+                <div id="loading" class="loading hidden">Processing...</div>
+            </div>
+            
+            <div class="controls">
+                <button id="btn-jump" class="btn btn-action btn-jump">J</button>
+                <button id="btn-slide" class="btn btn-action btn-slide">S</button>
+            </div>
+        </div>
+    </div>
+    <script src="/static/javascript.js"></script>
+    <!-- <script src="javascript.js"></script> -->
+</body>
+</html>

@@ -1,0 +1,40 @@
+map_name: oven_of_witch
+model_path: model_params/model_ep1000.pth
+npz_dataset_path: dataset/oow_combined_data.npz
+is_train: false
+
+# device
+device: cpu # cuda:0 Training must be done using CUDA, but CPU is sufficient for simulation.
+
+# environment
+observation_shape: [3, 128, 256] # (Channels, Height, Width)
+action_size: 3 # (none, jump, slide)
+
+# training
+start_episodes: 1
+episodes: 1000
+world_model_update_step: 50
+
+batch_size: 50
+batch_length: 50
+
+# model sizes
+encoded_state_size: 2048
+recurrent_size: 512
+latent_length: 16
+latent_classes: 16
+latent_size: 256        # 16 * 16 latent_length * latent_classes
+full_state_size: 768    # 512 + 256  recurrent_size + latent_size
+
+# loss / regularization
+uniform_mix: 0.01
+beta_posterior: 0.1
+beta_prior: 1.0
+
+# optimizer
+world_model_lr: 0.0003
+world_model_weight_decay: 0.0001
+
+# gradient
+gradient_norm_type: 2
+gradient_clip: 100
