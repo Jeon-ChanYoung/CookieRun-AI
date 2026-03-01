@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from torch.distributions import Independent, OneHotCategoricalStraightThrough
 from torch.distributions.utils import probs_to_logits
 from .blocks import ResBlock, SelfAttention
+from .utils import straight_through_categorical
 
 ######################## LatentEncoder #########################
 
@@ -174,15 +174,16 @@ class TransitionModel(nn.Module):
             nn.Linear(hidden_size, self.config.latent_size),
         )
 
-    def forward(self, hidden):
+    def get_logits(self, hidden):
         x = self.network(hidden)
-
         probs = x.view(-1, self.config.latent_length, self.config.latent_classes).softmax(-1)
         uniform = torch.ones_like(probs) / self.config.latent_classes
         probs = (1 - self.config.uniform_mix) * probs + self.config.uniform_mix * uniform
-        logits = probs_to_logits(probs)
+        return probs_to_logits(probs)
 
-        sample = Independent(OneHotCategoricalStraightThrough(logits=logits), 1).rsample()
+    def forward(self, hidden):
+        logits = self.get_logits(hidden)
+        sample = straight_through_categorical(logits)
         return sample.view(-1, self.config.latent_size), logits
     
 ######################## RepresentationModel #########################
@@ -213,5 +214,5 @@ class RepresentationModel(nn.Module):
         probs = (1 - self.config.uniform_mix) * probs + self.config.uniform_mix * uniform
         logits = probs_to_logits(probs)
 
-        sample = Independent(OneHotCategoricalStraightThrough(logits=logits), 1).rsample()
+        sample = straight_through_categorical(logits)
         return sample.view(-1, self.config.latent_size), logits

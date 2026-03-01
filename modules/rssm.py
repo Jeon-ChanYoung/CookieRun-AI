@@ -43,25 +43,26 @@ class RSSM(nn.Module):
         hidden = torch.zeros(B, self.config.recurrent_size, device=self.config.device)
         latent = torch.zeros(B, self.config.latent_size, device=self.config.device)
 
-        hiddens = []                                     
+        hiddens = []
         latents = []
-        priors_logits = []
         posteriors_logits = []
 
         for t in range(1, T):
             hidden = self.recurrent_model(hidden, latent, actions[:, t-1])
-            _, prior_logits = self.transition_model(hidden)
-            latent, posterior_logits = self.representation_model(hidden, encoded_states[:, t])
-
+            latent, posterior_logits = self.representation_model(
+                hidden, encoded_states[:, t]
+            )
             hiddens.append(hidden)
             latents.append(latent)
-            priors_logits.append(prior_logits)
             posteriors_logits.append(posterior_logits)
 
-        hiddens = torch.stack(hiddens, dim=1)            
-        latents = torch.stack(latents, dim=1)            
-        priors_logits = torch.stack(priors_logits, dim=1)
+        hiddens = torch.stack(hiddens, dim=1)
+        latents = torch.stack(latents, dim=1)
         posteriors_logits = torch.stack(posteriors_logits, dim=1)
+
+        priors_logits = self.transition_model.get_logits(
+            hiddens.view(B * (T-1), self.config.recurrent_size)
+        ).view(B, T-1, self.config.latent_length, self.config.latent_classes)
 
         """
         hiddens:           (B, T-1, recurrent_size)
