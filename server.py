@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 
-from modules.vae import VAE
+from modules.vqvae import VQVAE
 from modules.rssm import RSSM
 from wrapper import Wrapper
 
@@ -13,9 +13,14 @@ def create_app(config):
     static_path = "static"
     app.mount("/static", StaticFiles(directory=static_path), name="static")
     
+    
     print("🔄 Loading resources...")
-    vae = VAE(config)
-    rssm = RSSM(config)
+    vqvae = VQVAE(config)
+    vqvae.load_vqvae(config.vqvae_path)
+    codebook_weight = vqvae.quantizer.embedding.clone().detach()
+
+    rssm = RSSM(config, codebook_weight)
+    rssm.load_rssm(config.rssm_path)
     print("✅ Resources loaded.")
     
     @app.get("/", response_class=HTMLResponse)
@@ -30,7 +35,7 @@ def create_app(config):
 
         wrapper = Wrapper(
             config=config,
-            vae=vae,
+            vqvae=vqvae,
             rssm=rssm
         )
         

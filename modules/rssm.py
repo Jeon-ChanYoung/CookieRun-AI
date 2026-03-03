@@ -5,43 +5,36 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-from .rssm_network import LatentEncoder, LatentDecoder, RecurrentModel, TransitionModel, RepresentationModel
+from .rssm_network import Encoder, Decoder, RecurrentModel, TransitionModel, RepresentationModel
 
 ######################## Recurrent State Space Model #########################
 
 class RSSM(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, codebook_weight=None):
         super().__init__()
 
         self.config = config
  
         # model
-        self.encoder = LatentEncoder(config)
-        self.decoder = LatentDecoder(config)
+        self.encoder = Encoder(config, codebook_weight)
+        self.decoder = Decoder(config)
         self.recurrent_model = RecurrentModel(config)
         self.transition_model = TransitionModel(config)
         self.representation_model = RepresentationModel(config)
 
         # optimizer
-        self.rssm_optimizer = optim.Adam(self.parameters(), lr=config.rssm_lr)
+        self.rssm_optimizer = optim.Adam(
+            [p for p in self.parameters() if p.requires_grad],
+            lr=config.rssm_lr # rssm_lr = 0.0003
+        )
 
-        # normalization
-        self.register_buffer('z_mean', torch.zeros(4, 1, 1))
-        self.register_buffer('z_std',  torch.ones(4, 1, 1))
 
-        self.load_rssm(config.rssm_path)
-
-    def train_step(self, zs, actions):
-        """
-            zs:      (B, T, 4, 16, 32)
-            actions: (B, T, 3)
-        """
-        B, T = zs.shape[:2] 
-        zs_norm = self.normalize(zs)
-        encoded_states = self.encoder(zs_norm)
+    def train_step(self, indices, actions):
+        B, T = indices.shape[:2] 
+        encoded_states = self.encoder(indices)
 
         hidden = torch.zeros(B, self.config.recurrent_size, device=self.config.device)
-        latent = torch.zeros(B, self.config.latent_size, device=self.config.device)
+        latent, _ = self.representation_model(hidden, encoded_states[:, 0])
 
         hiddens = []
         latents = []
@@ -74,9 +67,16 @@ class RSSM(nn.Module):
         ############# compute loss #############
 
         # recon loss
-        predicted_latents = self.decoder(hiddens, latents)
-        target_latents = zs_norm[:, 1:]
-        reconstruction_loss = F.mse_loss(predicted_latents, target_latents)
+        predicted_logits = self.decoder(hiddens, latents) # (B, T-1, K=256, 16, 32)
+        target_indices = indices[:, 1:]  # (B, T-1, 16, 32)
+
+        pred_flat = predicted_logits.permute(0, 1, 3, 4, 2).reshape(-1, self.config.vq_codebook_size)
+        target_flat = target_indices.reshape(-1)
+        reconstruction_loss = F.cross_entropy(pred_flat, target_flat, label_smoothing=self.config.label_smoothing) # label_smoothing = 0.1
+
+        # for logging
+        with torch.no_grad():
+            accuracy = (pred_flat.argmax(-1) == target_flat).float().mean()
 
         # kl loss
         prior_loss = self.compute_kl(posteriors_logits.detach(), priors_logits)
@@ -98,7 +98,7 @@ class RSSM(nn.Module):
         )
         self.world_model_optimizer.step()
 
-        return loss.item(), reconstruction_loss.item(), kl_loss.item()
+        return loss.item(), reconstruction_loss.item(), kl_loss.item(), accuracy.item()
     
 
     def compute_kl(self, logits_p, logits_q):
@@ -108,31 +108,21 @@ class RSSM(nn.Module):
         return (p * (log_p - log_q)).sum(dim=(-2, -1))
     
 
-    def normalize(self, z):
-        return (z - self.z_mean) / self.z_std
-
-
-    def denormalize(self, z_norm):
-        return z_norm * self.z_std + self.z_mean
-
-
-    def set_latent_stats(self, mean, std):
-        self.z_mean.copy_(mean)
-        self.z_std.copy_(std)
-        print(f"Latent stats set: mean={mean.squeeze()}, std={std.squeeze()}")
-
-
     def change_train_mode(self, train=True):
-        if not train:
-            for module in self.network_modules:
-                for param in module.parameters():
-                    param.requires_grad = False
-                module.eval()
+        if train:
+            self.train()
+            for name, p in self.named_parameters():
+                p.requires_grad = 'embed.weight' not in name
         else:
-            for module in self.network_modules:
-                for param in module.parameters():
-                    param.requires_grad = True
-                module.train()
+            self.eval()
+            for p in self.parameters():
+                p.requires_grad = False
+
+
+    @torch.no_grad()
+    def logits_to_indices(self, logits):
+        # logits: (..., K, H, W) -> indices: (..., H, W)
+        return logits.argmax(dim=-3)
 
 
     def save_rssm(self, epoch, save_dir):
@@ -144,8 +134,6 @@ class RSSM(nn.Module):
             'transition_model'      : self.transition_model.state_dict(),
             'representation_model'  : self.representation_model.state_dict(),
             'rssm_optimizer'        : self.rssm_optimizer.state_dict(),
-            'z_mean'                : self.z_mean,
-            'z_std'                 : self.z_std,
         }, save_path)
         print(f"RSSM Model saved: {save_path}")
 
@@ -159,6 +147,4 @@ class RSSM(nn.Module):
         self.transition_model.load_state_dict(checkpoint['transition_model'])
         self.representation_model.load_state_dict(checkpoint['representation_model'])
         self.rssm_optimizer.load_state_dict(checkpoint['rssm_optimizer'])
-        self.z_mean.copy_(checkpoint['z_mean'])
-        self.z_std.copy_(checkpoint['z_std'])
         print("RSSM Checkpoint loaded successfully.")

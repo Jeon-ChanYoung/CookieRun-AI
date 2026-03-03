@@ -4,15 +4,20 @@ from torch.distributions.utils import probs_to_logits
 from .blocks import ResBlock, SelfAttention
 from .utils import straight_through_categorical
 
-######################## LatentEncoder #########################
+######################## Encoder #########################
 
-class LatentEncoder(nn.Module):
-    def __init__(self, config):
+class Encoder(nn.Module):
+    def __init__(self, config, codebook_weight=None):
         super().__init__()
 
+        self.embed = nn.Embedding(config.vq_codebook_size, config.vq_code_dim)
+        if codebook_weight is not None:
+            self.embed.weight.data.copy_(codebook_weight)
+            self.embed.weight.requires_grad = False 
+
         self.network = nn.Sequential(
-            # (4, 16, 32) -> (64, 8, 16)
-            nn.Conv2d(4, 64, 3, 2, 1, bias=False),
+            # (D, 16, 32) -> (64, 8, 16)
+            nn.Conv2d(config.vq_code_dim, 64, 3, 2, 1, bias=False),
             ImageChannelLayerNorm(64),
             nn.SiLU(),
 
@@ -20,7 +25,6 @@ class LatentEncoder(nn.Module):
             nn.Conv2d(64, 128, 3, 2, 1, bias=False),
             ImageChannelLayerNorm(128),
             nn.SiLU(),
-
             ResBlock(128),
             SelfAttention(128),
 
@@ -28,7 +32,6 @@ class LatentEncoder(nn.Module):
             nn.Conv2d(128, 256, 3, 2, 1, bias=False),
             ImageChannelLayerNorm(256),
             nn.SiLU(),
-
             ResBlock(256),
 
             nn.Flatten(),
@@ -37,19 +40,23 @@ class LatentEncoder(nn.Module):
             nn.SiLU(),
         )
 
-    def forward(self, x):
-        if x.ndim == 5:
-            B, T, C, H, W = x.shape
-            x = x.view(B * T, C, H, W)
+    def forward(self, indices):
+        if indices.ndim == 5:
+            B, T, H, W = indices.shape
+            x = indices.reshape(B * T, H, W)
+            x = self.embed(x)
+            x = x.permute(0, 3, 1, 2)
             x = self.network(x)
             x = x.view(B, T, -1)
         else:
+            x = self.embed(indices)
+            x = x.permute(0, 3, 1, 2)
             x = self.network(x)
         return x
 
-######################## LatentDecoder #########################
+######################## Decoder #########################
 
-class LatentDecoder(nn.Module):
+class Decoder(nn.Module):
     def __init__(self, config, eps=1e-3):
         super().__init__()
         self.config = config
@@ -59,7 +66,6 @@ class LatentDecoder(nn.Module):
             nn.LayerNorm(256 * 2 * 4, eps=eps),
             nn.SiLU(),
             nn.Unflatten(1, (256, 2, 4)),
-
             ResBlock(256),
 
             # (256, 2, 4) -> (128, 4, 8)
@@ -67,19 +73,22 @@ class LatentDecoder(nn.Module):
             nn.Conv2d(256, 128, 3, 1, 1, bias=False),
             ImageChannelLayerNorm(128),
             nn.SiLU(),
-
-            ResBlock(128),
+            ResBlock(128), 
             SelfAttention(128),
 
             # (128, 4, 8) -> (64, 8, 16)
             nn.Upsample(scale_factor=2, mode='nearest'),
-            nn.Conv2d(128, 64, 3, 1, 1, bias=False),
-            ImageChannelLayerNorm(64, eps),
+            nn.Conv2d(128, 128, 3, 1, 1, bias=False),
+            ImageChannelLayerNorm(128, eps),
             nn.SiLU(),
+            ResBlock(128),
 
-            # (64, 8, 16) -> (4, 16, 32)
+            # (64, 8, 16)-> (K, 16, 32)
             nn.Upsample(scale_factor=2, mode='nearest'),
-            nn.Conv2d(64, config.latent_channel, 3, 1, 1),
+            nn.Conv2d(128, 128, 3, 1, 1, bias=False),
+            ImageChannelLayerNorm(128, eps),
+            nn.SiLU(),
+            nn.Conv2d(128, config.vq_codebook_size, 1)
         )
 
     def forward(self, hidden, latent):
@@ -89,7 +98,8 @@ class LatentDecoder(nn.Module):
             B, T, C = x.shape
             x = x.view(B * T, C)
             x = self.network(x)
-            x = x.view(B, T, *self.config.latent_shape_vae)
+            _, K, H, W = x.shape
+            x = x.view(B, T, K, H, W)
         else:
             x = self.network(x)
         return x

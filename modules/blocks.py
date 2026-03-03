@@ -12,10 +12,10 @@ class ResBlock(nn.Module):
             nn.GroupNorm(8, channels),
             nn.SiLU(),
             nn.Conv2d(channels, hidden, 1),     
-            nn.GroupNorm(min(8, hidden), hidden),
+            nn.GroupNorm(8, hidden),
             nn.SiLU(),
             nn.Conv2d(hidden, hidden, 3, 1, 1), 
-            nn.GroupNorm(min(8, hidden), hidden),
+            nn.GroupNorm(8, hidden),
             nn.SiLU(),
             nn.Conv2d(hidden, channels, 1),    
         )
