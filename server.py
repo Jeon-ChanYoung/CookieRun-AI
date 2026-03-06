@@ -1,10 +1,9 @@
-import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 
-from modules.vqvae import VQVAE
 from modules.rssm import RSSM
+from modules.vqvae import VQVAE
 from wrapper import Wrapper
 
 
@@ -17,90 +16,73 @@ def create_app(config):
     print("🔄 Loading resources...")
     vqvae = VQVAE(config).to(config.device)
     vqvae.load_vqvae(config.vqvae_path)
+    vqvae.change_train_mode(train=False)
+
     codebook_weight = vqvae.quantizer.embedding.clone().detach()
 
-    rssm = RSSM(config, codebook_weight).to(config.device)
+    rssm = RSSM(config, codebook_weight=codebook_weight).to(config.device)
     rssm.load_rssm(config.rssm_path)
+    rssm.change_train_mode(train=False)
     print("✅ Resources loaded.")
 
     @app.get("/", response_class=HTMLResponse)
     async def read_root():
         html_file = f"{static_path}/index.html"
-        with open(html_file, 'r', encoding='utf-8') as f:
+        with open(html_file, "r", encoding="utf-8") as f:
             return f.read()
 
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         await websocket.accept()
-        wrapper = Wrapper(config=config, vqvae=vqvae, rssm=rssm)
 
-        latest_action = "none"
-        running = True
+        wrapper = Wrapper(
+            config=config,
+            vqvae=vqvae,
+            rssm=rssm,
+        )
 
-        async def receive_actions():
-            nonlocal latest_action, running
-            try:
-                while running:
-                    data = await websocket.receive_json()
-                    if data.get("type") == "reset":
-                        latest_action = "reset"
-                    else:
-                        latest_action = data.get("action", "none")
-            except (WebSocketDisconnect, Exception):
-                running = False
+        try:
+            img = wrapper.reset()
+            img_base64 = wrapper.image_to_base64(img)
 
-        async def generate_frames():
-            nonlocal latest_action, running
-            TARGET_FPS = 5
-            FRAME_INTERVAL = 1.0 / TARGET_FPS
-            loop = asyncio.get_running_loop()
+            await websocket.send_json({
+                "status": "success",
+                "image": img_base64,
+                "current_action": "reset",
+            })
 
-            # ── 초기 리셋 ──
-            img_base64 = await asyncio.to_thread(wrapper.reset_and_encode)
-            try:
+            while True:
+                data = await websocket.receive_json()
+                action_type = data.get("type")
+                action = data.get("action", "none")
+
+                if action_type == "reset":
+                    img = wrapper.reset()
+                elif action_type == "action":
+                    img = wrapper.step(action)
+                else:
+                    continue
+
+                img_base64 = wrapper.image_to_base64(img)
+
                 await websocket.send_json({
                     "status": "success",
                     "image": img_base64,
-                    "current_action": "reset"
+                    "current_action": action,
                 })
-            except Exception:
-                running = False
-                return
 
-            while running:
-                frame_start = loop.time()
-
-                action = latest_action
-                if action in ("jump", "reset"):
-                    latest_action = "none"
-
-                try:
-                    # ── step + encode 를 단일 thread 호출로 통합 ──
-                    img_base64 = await asyncio.to_thread(
-                        wrapper.step_and_encode, action
-                    )
-
-                    await websocket.send_json({
-                        "status": "success",
-                        "image": img_base64,
-                        "current_action": action
-                    })
-                except (WebSocketDisconnect, Exception) as e:
-                    if not isinstance(e, WebSocketDisconnect):
-                        print(f"Frame error: {e}")
-                    running = False
-                    break
-
-                elapsed = loop.time() - frame_start
-                sleep_time = FRAME_INTERVAL - elapsed
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-
-        try:
-            await asyncio.gather(receive_actions(), generate_frames())
+        except WebSocketDisconnect:
+            print("Client disconnected")
         except Exception as e:
             import traceback
             traceback.print_exc()
             print(f"WebSocket error: {e}")
+            try:
+                await websocket.send_json({
+                    "status": "error",
+                    "message": str(e),
+                })
+            except:
+                pass
 
     return app
