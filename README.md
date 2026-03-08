@@ -13,6 +13,18 @@ https://github.com/Jeon-ChanYoung/Cookie-Run-AI
 | **Training Data** | 50 real gameplay videos (~48,000 frames) |
 
 <br>
+
+## Training Data Distribution
+
+> **Total Frames: 47,704** (from 50 real gameplay videos)
+
+| Action | Label | Frames | Ratio |
+|:------:|-------|-------:|------:|
+| 0 | None | 35,773 | 75.0% |
+| 1 | Jump | 1,249 | 2.6% |
+| 2 | Slide | 10,682 | 22.4% |
+
+<br>
   
 ## Real
 <img src="assets/real.gif" width="512"/>
