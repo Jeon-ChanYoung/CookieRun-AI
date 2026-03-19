@@ -121,7 +121,7 @@ class RecurrentModel(nn.Module):
         A = config.action_size    # 3
         
         self.network = nn.Sequential(
-            nn.Linear(R + A, hidden_size, bias=False),
+            nn.Linear(L + A, hidden_size, bias=False),
             nn.LayerNorm(hidden_size, eps=eps),
             nn.SiLU(),
             
