@@ -1,5 +1,5 @@
 # Cookie-Run-AI-v3
-Play in an environment where an AI learns the first stage of Cookie Run, “The Witch's Oven,” and generates the next screen in real time based on your input.  
+Play in an environment where an AI learns the first stage of Cookie Run, “The Witch's Oven,” and generates the next screen in real time based on your input. This is so called World Model for games based on (FSQ) VQ-VAE + RSSM.  
 
 **Previous Version:**  
 - https://github.com/Jeon-ChanYoung/Cookie-Run-AI
