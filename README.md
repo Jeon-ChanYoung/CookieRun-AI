@@ -151,4 +151,6 @@ python main.py
 
 - ⬆️ Arrow Up: Jump
 - ⬇️ Arrow Down: Slide
-- 🔄 R Key: Reset
+- 🔄 R Key: Reset  
+
+Due to the limited size of the dataset, unable to cover all possible game scenarios, and there may be some blur regarding unusual(or unique) gameplay. In particular, the following stages are not included.  
