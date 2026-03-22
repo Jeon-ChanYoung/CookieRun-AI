@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import base64
 import os
 import cv2
 import time
@@ -25,7 +26,7 @@ class Wrapper:
         self._zero_latent = torch.zeros(
             1, config.latent_size, device=config.device
         )
-        self._jpeg_params = [cv2.IMWRITE_JPEG_QUALITY, 92]
+        self._jpeg_params = [cv2.IMWRITE_JPEG_QUALITY, 95]
 
         # recording
         self.recording_dir = getattr(config, "recording_dir", "recordings")
@@ -33,8 +34,6 @@ class Wrapper:
         self._video_writer = None
         self._frame_count = 0
         self._record_start = None
-
-
         self.reset()
         print("Game state initialized")
 
@@ -90,85 +89,95 @@ class Wrapper:
             1, self.config.recurrent_size, device=self.config.device
         )
 
-        initial_img = self._random_sample_tensor()
-        initial_indices = self.vqvae.encode(initial_img)
-        encoded_state = self.rssm.encoder(initial_indices)
+        initial_img = self.single_state_sample()         # (1, 3, 128, 256)
+        initial_indices = self.vqvae.encode(initial_img) # (1, 8, 16) LongTensor
+
+        encoded_state = self.rssm.encoder(initial_indices)    # (1, encoded_state_size)
+
+        action = self._action_tensors["none"]
 
         self.recurrent_state = self.rssm.recurrent_model(
             self.recurrent_state,
-            self._zero_latent,
-            self._action_tensors["none"],
+            torch.zeros(1, self.config.latent_size, device=self.config.device),
+            action,
         )
+
         self.latent_state, _ = self.rssm.representation_model(
             self.recurrent_state, encoded_state
         )
-        img = self._render()
+        img = self.get_current_image()
 
-        # 새 녹화 시작
         self._start_recording(img)
         self._record_frame(img)
 
         return img
-
 
     @torch.inference_mode()
     def step(self, action_name: str):
         action_tensor = self._action_tensors.get(
             action_name, self._action_tensors["none"]
         )
+
         self.recurrent_state = self.rssm.recurrent_model(
-            self.recurrent_state, self.latent_state, action_tensor
+            self.recurrent_state,
+            self.latent_state,
+            action_tensor,
         )
         self.latent_state, _ = self.rssm.transition_model(self.recurrent_state)
-        img = self._render()
-
+        
+        img = self.get_current_image()
         self._record_frame(img)
 
         return img
 
 
     @torch.inference_mode()
-    def _render(self):
+    def get_current_image(self):
         token_logits = self.rssm.decoder(self.recurrent_state, self.latent_state)
-        token_indices = token_logits.argmax(dim=-3)
-        recon = self.vqvae.decode(token_indices)
 
-        img = recon[0].clamp_(0, 1).mul_(255).byte().cpu().numpy()
-        return np.ascontiguousarray(img.transpose(1, 2, 0)) 
+        token_indices = token_logits.argmax(dim=-3)  
 
+        reconstruction = self.vqvae.decode(token_indices)
 
-    def reset_to_bytes(self) -> bytes:
-        return self._encode_jpeg(self.reset())
+        img = reconstruction[0].clamp_(0.0, 1.0).mul_(255.0).byte().cpu().numpy()
+        img = np.ascontiguousarray(img.transpose(1, 2, 0)) # (C, H, W) -> (H, W, C)
 
-
-    def step_to_bytes(self, action_name: str) -> bytes:
-        return self._encode_jpeg(self.step(action_name))
+        return img
 
 
-    def _encode_jpeg(self, img_rgb: np.ndarray) -> bytes:
-        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-        _, buf = cv2.imencode(".jpg", img_bgr, self._jpeg_params)
-        return buf.tobytes()
+    def image_to_base64(self, img):
+        _, buf = cv2.imencode(".jpg", cv2.cvtColor(img, cv2.COLOR_RGB2BGR), self._jpeg_params)
+        img_base64 = base64.b64encode(buf.data).decode("ascii")
+        return f"data:image/jpeg;base64,{img_base64}"
 
 
-    def _random_sample_tensor(self):
+    def single_state_sample(self):
         idx = np.random.randint(0, len(self.sample_images))
-        img = self.sample_images[idx]
-        t = torch.from_numpy(img).float().div_(255.0)
-        return t.permute(2, 0, 1).unsqueeze(0).to(self.config.device)
+        img = self.sample_images[idx]  # (128, 256, 3) uint8
+
+        img_tensor = torch.from_numpy(img).float() / 255.0
+        img_tensor = img_tensor.permute(2, 0, 1).unsqueeze(0)  # (1, 3, 128, 256)
+        img_tensor = img_tensor.to(self.config.device)
+
+        return img_tensor
 
 
     def _load_samples(self):
         samples_dir = "samples/oven_of_witch"
-        if not os.path.exists(samples_dir):
-            raise FileNotFoundError(f"Not found: {samples_dir}")
 
+        if not os.path.exists(samples_dir):
+            raise FileNotFoundError(f"Samples directory not found: {samples_dir}")
 
         self.sample_images = []
-        for fn in sorted(os.listdir(samples_dir)):
-            if fn.startswith("oow_sample") and fn.endswith(".png"):
-                img = cv2.imread(os.path.join(samples_dir, fn))
-                self.sample_images.append(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+        for filename in sorted(os.listdir(samples_dir)):
+            if not filename.startswith("oow_sample") or not filename.endswith(".png"):
+                continue
+
+            file_path = os.path.join(samples_dir, filename)
+            img = cv2.imread(file_path)
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            self.sample_images.append(img_rgb)
 
         print(f"✅ Loaded {len(self.sample_images)} sample images")
 
