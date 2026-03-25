@@ -8,7 +8,7 @@ let fpsLastUpdateTime = performance.now();
 
 let hudActionTimeout = null; 
 
-const ACTION_REPEAT_INTERVAL = 40; // milliseconds
+const ACTION_REPEAT_INTERVAL = 50; // milliseconds
 const HUD_JUMP_DURATION = 200;
 
 // #################### WebSocket ####################

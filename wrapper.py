@@ -112,15 +112,19 @@ class Wrapper:
         self.latent_state, _ = self.rssm.representation_model(
             self.recurrent_state, encoded_state
         )
-        img = self.get_current_image()
+        img, confidence = self.get_current_image()
 
         self._start_recording(img)
         self._record_frame(img)
+
+        print(f"RESET | Confidence: {confidence:.1f}%")
 
         return img
 
     @torch.inference_mode()
     def step(self, action_name: str):
+        start_time = time.perf_counter()
+
         action_tensor = self._action_tensors.get(
             action_name, self._action_tensors["none"]
         )
@@ -132,8 +136,13 @@ class Wrapper:
         )
         self.latent_state, _ = self.rssm.transition_model(self.recurrent_state)
         
-        img = self.get_current_image()
+
+        img, confidence = self.get_current_image()
+        inference_time = (time.perf_counter() - start_time) * 1000  # ms
+
         self._record_frame(img)
+
+        print(f"Action: {action_name:5s} | Time: {inference_time:5.1f}ms | Confidence: {confidence:5.1f}%")
 
         return img
 
@@ -142,6 +151,10 @@ class Wrapper:
     def get_current_image(self):
         token_logits = self.rssm.decoder(self.recurrent_state, self.latent_state)
 
+        token_probs = torch.softmax(token_logits, dim=-3) 
+        max_probs = token_probs.max(dim=-3).values         # (1, H, W)
+        confidence = max_probs.mean().item() * 100         
+
         token_indices = token_logits.argmax(dim=-3)  
 
         reconstruction = self.vqvae.decode(token_indices)
@@ -149,7 +162,7 @@ class Wrapper:
         img = reconstruction[0].clamp_(0.0, 1.0).mul_(255.0).byte().cpu().numpy()
         img = np.ascontiguousarray(img.transpose(1, 2, 0)) # (C, H, W) -> (H, W, C)
 
-        return img
+        return img, confidence
 
 
     def image_to_base64(self, img):
