@@ -1,9 +1,5 @@
-# CookieRun-AI-v3
-Play in an environment where an AI learns the first stage of Cookie Run, “The Witch's Oven,” and generates the next screen in real time based on your input. This is so called World Model for games based on (FSQ) VQ-VAE + RSSM.  
-
-**Previous Version:**  
-- ~~`https://github.com/Jeon-ChanYoung/Cookie-Run-AI`~~
-- ~~`https://github.com/Jeon-ChanYoung/Cookie-Run-AI-v2`~~
+# CookieRun-AI
+Play in an environment where an AI learns the first stage of Cookie Run, “The Witch's Oven,” and generates the next screen in real time based on your input.
 
 <br>
 
@@ -35,32 +31,6 @@ Play in an environment where an AI learns the first stage of Cookie Run, “The 
 ## Fake (AI-generated)
 <img src="assets/fake.gif" width="512"/>
 
-#### Model Architecture & Improvements
-
-This project is an **enhanced version of Cookie-Run-AI v2**, featuring significant architectural improvements to solve the training bottlenecks observed in the previous version. 
-
-| Feature | v1 | v2 | **v3 (Current)** |
-|---------|----|----|------------------|
-| **Architecture** | End-to-end RSSM | Two-stage (VQ-VAE $\rightarrow$ RSSM) | **Two-stage (FSQ $\rightarrow$ RSSM)** |
-| **Quantization** | None (Continuous) | Vector Quantization (EMA) | **Finite Scalar Quantization (FSQ)** |
-| **Codebook Size ($K$)** | - | 256 | **64** (Levels: [4, 4, 4]) |
-| **Code Dim ($D$)** | - | 8 | **3** |
-| **Spatial Resolution** | Pixel level | 16 x 32 (512 tokens) | **8 x 16 (128 tokens)** |
-| **CNN Backbone** | Standard CNN | Standard ResNet | **Deeper ResNet** |
-
-<br>
-
-### Experiment
-**The Bottleneck in v2:**  
-When using a token grid of 512 tokens (16×32) with a codebook size of 256, the RSSM training consistently plateaued at an early stage. The RSSM decoder had to solve a highly complex prediction problem: predicting one of 256 categories for each of the 512 spatial tokens at every step. This substantially increased the reconstruction burden on the world model and limited downstream accuracy.
-
-**The Solution in v3:**  
-To address this, we implemented **FSQ (Finite Scalar Quantization)** and aggressively reduced the complexity of the latent space:
-1. **Token Compactness:** Reduced the spatial token resolution from 16×32 to **8×16** (128 tokens).
-2. **Simplified Codebook:** Reduced the codebook size ($K$) from 256 to **64** and dimensions ($D$) from 8 to **3**.
-3. **Enhanced Autoencoder:** Such extreme compression (roughly a 1000:1 ratio) could degrade reconstruction quality. To compensate, we **substantially strengthened both the encoder and decoder architectures** (adding DownBlocks, UpBlocks, and more ResBlocks), allowing the tokenizer to preserve visual fidelity despite the much tighter bottleneck.
-4. **Optimized RSSM:** Lightweighted and optimized the network module to accommodate the reduced token dimensions.
-
 <br>
 
 ## Loss 
@@ -81,8 +51,6 @@ Epoch [28/30] VQ-VAE loss: 0.242575  recon: 0.015040  p_l: 0.758450
 Epoch [29/30] VQ-VAE loss: 0.245375  recon: 0.014927  p_l: 0.768160 
 Epoch [30/30] VQ-VAE loss: 0.231396  recon: 0.014662  p_l: 0.722447  
 ```
-
-As you can see here, even if we reduce K and D slightly, the final loss values remain similar. Therefore, reducing K and D makes it much easier for the RSSM to learn.  
 
 <br>
 
@@ -111,18 +79,12 @@ Epoch [399/400] RSSM loss: 0.823704  recon: 0.600613  kl: 2.230909  acc: 0.7963 
 Epoch [400/400] RSSM loss: 0.809256  recon: 0.591078  kl: 2.181778  acc: 0.7989  top5: 0.9684
 ```
 
-Here, acc (Accuracy) and top5 (Top-5 Accuracy) measure how well the RSSM's decoder predicts the correct VQ token index at each spatial position:  
-
-- acc (Top-1 Accuracy): The proportion of spatial tokens for which the RSSM decoder's single highest-probability prediction exactly matches the ground-truth VQ token index. An accuracy of 0.7989 means that ~80% of the 128 tokens per frame are predicted correctly on the first guess.  
-
-- top5 (Top-5 Accuracy): The proportion of spatial tokens for which the ground-truth VQ token index appears within the decoder's top 5 highest-probability predictions (out of 64 possible codebook entries). A top-5 accuracy of 0.9684 means that ~97% of the time, the correct token is among the model's 5 most confident candidates.  
-
 <br>
 
 ## How to Run  
 **1. Clone the repository and install dependencies:** 
 ```
-git clone https://github.com/Jeon-ChanYoung/Cookie-Run-AI-v3.git
+git clone https://github.com/Jeon-ChanYoung/Cookie-Run-AI.git
 pip install -r requirements.txt
 ```
 
